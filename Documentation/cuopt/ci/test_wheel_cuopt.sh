@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+set -euo pipefail
+
+# sets up a constraints file for 'pip' and puts its location in an exported variable PIP_EXPORT,
+# so those constraints will affect all future 'pip install' calls
+source rapids-init-pip
+
+# Download the packages built in the previous step
+RAPIDS_PY_CUDA_SUFFIX="$(rapids-wheel-ctk-name-gen "${RAPIDS_CUDA_VERSION}")"
+CUOPT_MPS_PARSER_WHEELHOUSE=$(RAPIDS_PY_WHEEL_NAME="cuopt_mps_parser" rapids-download-wheels-from-github python)
+CUOPT_SH_CLIENT_WHEELHOUSE=$(RAPIDS_PY_WHEEL_NAME="cuopt_sh_client" RAPIDS_PY_WHEEL_PURE="1" rapids-download-wheels-from-github python)
+CUOPT_WHEELHOUSE=$(RAPIDS_PY_WHEEL_NAME="cuopt_${RAPIDS_PY_CUDA_SUFFIX}" rapids-download-wheels-from-github python)
+LIBCUOPT_WHEELHOUSE=$(RAPIDS_PY_WHEEL_NAME="libcuopt_${RAPIDS_PY_CUDA_SUFFIX}" rapids-download-wheels-from-github cpp)
+
+# update pip constraints.txt to ensure all future 'pip install' (including those in ci/thirdparty-testing)
+# use these wheels for cuopt packages
+cat > "${PIP_CONSTRAINT}" <<EOF
+cuopt-${RAPIDS_PY_CUDA_SUFFIX} @ file://$(echo ${CUOPT_WHEELHOUSE}/cuopt_${RAPIDS_PY_CUDA_SUFFIX}-*.whl)
+cuopt-mps-parser @ file://$(echo ${CUOPT_MPS_PARSER_WHEELHOUSE}/cuopt_mps_parser-*.whl)
+cuopt-sh-client @ file://$(echo ${CUOPT_SH_CLIENT_WHEELHOUSE}/cuopt_sh_client-*.whl)
+libcuopt-${RAPIDS_PY_CUDA_SUFFIX} @ file://$(echo ${LIBCUOPT_WHEELHOUSE}/libcuopt_${RAPIDS_PY_CUDA_SUFFIX}-*.whl)
+EOF
+
+# generate constraints (possibly pinning to oldest support versions of dependencies)
+rapids-generate-pip-constraints test_python "${PIP_CONSTRAINT}"
+
+# notes:
+#
+#   * echo to expand wildcard before adding `[test]` requires for pip
+#   * just providing --constraint="${PIP_CONSTRAINT}" to be explicit, and because
+#     that environment variable is ignored if any other --constraint are passed via the CLI
+#
+rapids-pip-retry install \
+    --prefer-binary \
+    --constraint "${PIP_CONSTRAINT}" \
+    --constraint "${PIP_CONSTRAINT}" \
+    "${CUOPT_MPS_PARSER_WHEELHOUSE}"/cuopt_mps_parser*.whl \
+    "$(echo "${CUOPT_WHEELHOUSE}"/cuopt*.whl)[test]" \
+    "${CUOPT_SH_CLIENT_WHEELHOUSE}"/cuopt_sh_client*.whl \
+    "${LIBCUOPT_WHEELHOUSE}"/libcuopt*.whl
+
+python -c "import cuopt"
+
+if command -v apt-get &> /dev/null; then
+    apt-get -y update
+    apt-get -y install file unzip
+elif command -v dnf &> /dev/null; then
+    dnf -y update
+    dnf -y install file unzip
+fi
+
+./datasets/linear_programming/download_pdlp_test_dataset.sh
+./datasets/mip/download_miplib_test_dataset.sh
+cd ./datasets
+./get_test_data.sh --solomon
+./get_test_data.sh --tsp
+cd -
+
+RAPIDS_DATASET_ROOT_DIR="$(realpath datasets)"
+export RAPIDS_DATASET_ROOT_DIR
+
+RAPIDS_TESTS_DIR=${RAPIDS_TESTS_DIR:-"${PWD}/test-results"}
+export RAPIDS_TESTS_DIR
+mkdir -p "${RAPIDS_TESTS_DIR}"
+
+EXITCODE=0
+trap "EXITCODE=1" ERR
+set +e
+
+# Run CLI tests
+timeout 10m bash ./python/libcuopt/libcuopt/tests/test_cli.sh
+
+# Run Python tests
+
+# Due to race condition in certain cases UCX might not be able to cleanup properly, so we set the number of threads to 1
+export OMP_NUM_THREADS=1
+
+timeout 30m ./ci/run_cuopt_pytests.sh \
+  --junitxml="${RAPIDS_TESTS_DIR}/junit-wheel-cuopt.xml" \
+  --verbose --capture=no
+
+# run thirdparty integration tests for only nightly builds
+if [[ "${RAPIDS_BUILD_TYPE}" == "nightly" ]]; then
+    ./ci/thirdparty-testing/run_jump_tests.sh
+    ./ci/thirdparty-testing/run_cvxpy_tests.sh
+    ./ci/thirdparty-testing/run_pulp_tests.sh
+    ./ci/thirdparty-testing/run_pyomo_tests.sh
+fi
+
+# Generate nightly test report
+source "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/utils/nightly_report_helper.sh"
+generate_nightly_report "wheel-python" --with-python-version
+
+exit ${EXITCODE}
