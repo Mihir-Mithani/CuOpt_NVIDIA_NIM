@@ -1,10 +1,11 @@
 import requests
-
+import API
 invoke_url = "https://optimize.api.nvidia.com/v1/nvidia/cuopt"
 fetch_url_format = "https://optimize.api.nvidia.com/v1/status/"
 
+API = API.API()
 headers = {
-    "Authorization": "Bearer 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",
+    "Authorization": f"Bearer {API}",
     "Accept": "application/json",
 }
 
