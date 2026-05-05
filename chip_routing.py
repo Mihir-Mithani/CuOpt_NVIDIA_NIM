@@ -22,7 +22,6 @@ every pair of grid nodes.  Travel-time matrix models signal delay (RC).
 Usage
 ─────
   pip install requests
-  export NVIDIA_API_KEY="nvapi-..."
   python chip_routing_cuopt.py
 
 Output
@@ -31,13 +30,14 @@ Output
   wire-length and timing slack.
 """
 
-import os
-import sys
 import json
+import sys
 import time
-import math
+
 import requests
+
 import API
+
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 API_KEY = API.API()
