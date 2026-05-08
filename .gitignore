@@ -1,2 +1,13 @@
 API
 API.py
+Documentation/
+*.png
+*.jpg
+*.jpeg
+Documentation/
+.venv/
+__pycache__/
+.idea/
+*.png
+*.jpg
+*.jpeg
