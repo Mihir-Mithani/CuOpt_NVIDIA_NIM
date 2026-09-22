@@ -2,7 +2,7 @@
 
 ## 🔒 Security
 
-- [ ] **API Key Management**: Move hardcoded API key from `API.py` to environment variable (e.g., `NVIDIA_API_KEY`) or secure secret management
+- [x] **API Key Management**: Move hardcoded API key from `API.py` to environment variable (e.g., `NVIDIA_API_KEY`) or secure secret management
 - [ ] **Credential Rotation**: Add support for token refresh / API key rotation without code changes
 - [ ] **HTTPS Verification**: Ensure certificate validation is enforced (currently uses default requests behavior)
 
